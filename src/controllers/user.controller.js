@@ -158,7 +158,6 @@ const deactivateUser = async (req, res) => {
 |--------------------------------------------------------------------------
 | Activate User
 |--------------------------------------------------------------------------
-| Optional but useful
 */
 
 const activateUser = async (req, res) => {
