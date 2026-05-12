@@ -1,5 +1,8 @@
-module.exports = {
-  ADMIN: 'admin',
-  SUPPLIER: 'supplier',
-  CONSUMER: 'consumer'
+const ROLES = {
+  ADMIN: "ADMIN",
+  FARMER: "FARMER",
+  DISTRIBUTOR: "DISTRIBUTOR",
+  INSPECTOR: "INSPECTOR"
 };
+
+module.exports = ROLES;
