@@ -1,13 +1,6 @@
 const User = require("../models/user.model");
 const roles = require("../constants/roles");
 
-/*
-|--------------------------------------------------------------------------
-| Get All Users
-|--------------------------------------------------------------------------
-| Admin only
-*/
-
 const getAllUsers = async (req, res) => {
   try {
 
