@@ -1,9 +1,7 @@
-module.exports = {
-  CREATED: 'created',
-  IN_TRANSIT: 'in_transit',
-  RECEIVED: 'received',
-  REJECTED: 'rejected',
-  HARVESTED: 'harvested',
-  DELIVERED: 'delivered',
-  INSPECTED: 'inspected'
-};
+module.exports = Object.freeze({
+  HARVESTED: 'HARVESTED',
+  IN_TRANSIT: 'IN_TRANSIT',
+  DELIVERED: 'DELIVERED',
+  REJECTED: 'REJECTED',
+  INSPECTED: 'INSPECTED'
+});

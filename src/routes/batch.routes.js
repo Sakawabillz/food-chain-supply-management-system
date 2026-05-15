@@ -21,6 +21,13 @@ router.get(
   batchController.getBatchById
 );
 
+router.get(
+  '/:id/history',
+  authenticate,
+  batchValidation.batchId,
+  batchController.getBatchHistory
+);
+
 router.patch(
   '/:id/status',
   authenticate,

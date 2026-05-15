@@ -56,9 +56,8 @@ const createBatch = async (req, res, next) => {
       quantity: req.body.quantity,
       unit: req.body.unit,
       farmer: getUserId(req.user),
-      harvestDate: req.body.harvestDate,
-      status: BATCH_STATUS.HARVESTED
-    });
+      harvestDate: req.body.harvestDate
+    }, getUserId(req.user));
 
     return res.status(201).json({
       success: true,
@@ -80,21 +79,13 @@ const getBatches = async (req, res, next) => {
       return;
     }
 
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
     const query = isRole(req.user, ROLES.FARMER) ? { farmer: getUserId(req.user) } : {};
-    const batches = await batchService.getAllBatches(query);
-    const start = (page - 1) * limit;
-
-    return apiResponse.success(res, {
-      batches: batches.slice(start, start + limit),
-      pagination: {
-        page,
-        limit,
-        total: batches.length,
-        pages: Math.ceil(batches.length / limit)
-      }
+    const result = await batchService.getAllBatches(query, {
+      page: req.query.page,
+      limit: req.query.limit
     });
+
+    return apiResponse.success(res, result);
   } catch (error) {
     return next(error);
   }
@@ -122,6 +113,33 @@ const getBatchById = async (req, res, next) => {
   }
 };
 
+const getBatchHistory = async (req, res, next) => {
+  try {
+    if (!requireAuthenticatedUser(req, res)) {
+      return;
+    }
+
+    const batch = await batchService.getBatchHistory(req.params.id);
+
+    if (!batch) {
+      return apiResponse.error(res, 404, 'Batch not found');
+    }
+
+    if (isRole(req.user, ROLES.FARMER) && String(batch.farmer) !== String(getUserId(req.user))) {
+      return apiResponse.error(res, 403, 'You can only view your own batch history');
+    }
+
+    return apiResponse.success(res, {
+      batchCode: batch.batchCode,
+      productName: batch.productName,
+      currentStatus: batch.status,
+      history: batch.statusHistory
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const updateBatchStatus = async (req, res, next) => {
   try {
     if (!requireAuthenticatedUser(req, res)) {
@@ -132,7 +150,11 @@ const updateBatchStatus = async (req, res, next) => {
       return apiResponse.error(res, 403, 'You are not allowed to set this batch status');
     }
 
-    const batch = await batchService.updateBatchStatus(req.params.id, req.body.status);
+    const batch = await batchService.updateBatchStatus(
+      req.params.id,
+      req.body.status,
+      getUserId(req.user)
+    );
 
     if (!batch) {
       return apiResponse.error(res, 404, 'Batch not found');
@@ -148,5 +170,6 @@ module.exports = {
   createBatch,
   getBatches,
   getBatchById,
+  getBatchHistory,
   updateBatchStatus
 };
