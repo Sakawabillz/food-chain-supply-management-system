@@ -1,7 +1,9 @@
+const mongoose = require('mongoose');
 const Inspection = require('../models/inspection.model');
 const Batch = require('../models/batch.model');
 const BATCH_STATUS = require('../constants/batchStatus');
 const ROLES = require('../constants/roles');
+const { randomBytes } = require('crypto');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -11,73 +13,101 @@ const createError = (status, message) => {
   return error;
 };
 
-const generateInspectionCode = async () => {
-  const count = await Inspection.countDocuments();
-  const padded = String(count + 1).padStart(3, '0');
-  return `INSP-${padded}`;
+const generateInspectionCode = () => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = randomBytes(3).toString('hex').toUpperCase();
+  return `INSP-${timestamp}-${random}`;
 };
 
 // ─── Create Inspection ────────────────────────────────────────────────────────
-
 const createInspection = async ({ batchId, result, remarks, inspectionDate }, inspectorId) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  //Check batch exists
-  const batch = await Batch.findById(batchId);
-  if (!batch) {
-    throw createError(404, 'Batch not found');
+  try {
+    // 1. Check batch exists — inside transaction
+    const batch = await Batch.findById(batchId).session(session);
+    if (!batch) {
+      throw createError(404, 'Batch not found');
+    }
+
+    // 2. Enforce sequence — batch must be DELIVERED before inspection
+    // This also implicitly blocks REJECTED and INSPECTED batches
+    if (batch.status !== BATCH_STATUS.DELIVERED) {
+      throw createError(400, `Batch cannot be inspected at this stage. Current status: ${batch.status}`);
+    }
+
+    // 3. Prevent double inspection — check if a PASSED inspection already exists
+    // Inside transaction to prevent TOCTOU race condition
+    const existingInspection = await Inspection.findOne({
+      batch: batchId,
+      result: 'PASSED'
+    }).session(session);
+    if (existingInspection) {
+      throw createError(400, 'This batch has already passed inspection');
+    }
+
+    // 4. Determine new batch status based on result
+    const newBatchStatus = result === 'PASSED'
+      ? BATCH_STATUS.INSPECTED
+      : BATCH_STATUS.REJECTED;
+
+    // 5. Generate inspection code
+    const inspectionCode = generateInspectionCode();
+
+    // 6. Record batch status before change
+    const batchStatusBefore = batch.status;
+
+    // 7. Update batch status inside transaction
+    batch.status = newBatchStatus;
+    batch.statusHistory.push({
+      status: newBatchStatus,
+      changedBy: inspectorId,
+      note: `Inspection ${result}: ${remarks}`
+    });
+    await batch.save({ session });
+
+    // 8. Create inspection record inside same transaction
+    const [inspection] = await Inspection.create(
+      [
+        {
+          inspectionCode,
+          batch: batchId,
+          inspector: inspectorId,
+          inspectionDate: inspectionDate || new Date(),
+          result,
+          remarks,
+          batchStatusBefore,
+          batchStatusAfter: newBatchStatus
+        }
+      ],
+      { session }
+    );
+
+    // 9. Commit — both writes succeed or neither does
+    await session.commitTransaction();
+
+    let populatedInspection = inspection;
+    try {
+      populatedInspection = await inspection.populate([
+        { path: 'batch', select: 'batchCode productName status' },
+        { path: 'inspector', select: 'name email role' }
+      ]);
+    } catch (populateError) {
+      console.warn('Inspection created successfully but population failed:', populateError);
+    }
+
+    return populatedInspection;
+
+  } catch (error) {
+    // Roll back everything if anything failed before commit
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    throw error;
+  } finally {
+    session.endSession();
   }
-
-  //Enforce sequence — batch must be DELIVERED before inspection
-  // This also implicitly blocks REJECTED and INSPECTED batches
-  if (batch.status !== BATCH_STATUS.DELIVERED) {
-  throw createError(400, `Batch cannot be inspected at this stage. Current status: ${batch.status}`);
-  }
-
-  //Prevent double inspection — check if a PASSED inspection already exists
-  const existingInspection = await Inspection.findOne({
-    batch: batchId,
-    result: 'PASSED'
-  });
-  if (existingInspection) {
-    throw createError(400, 'This batch has already passed inspection');
-  }
-
-  //Determine new batch status based on result
-  const newBatchStatus = result === 'PASSED'
-    ? BATCH_STATUS.INSPECTED
-    : BATCH_STATUS.REJECTED;
-
-  //Generate inspection code
-  const inspectionCode = await generateInspectionCode();
-
-  //Record the batch status before change
-  const batchStatusBefore = batch.status;
-
-  //Update batch status and append to statusHistory
-  batch.status = newBatchStatus;
-  batch.statusHistory.push({
-    status: newBatchStatus,
-    changedBy: inspectorId,
-    note: `Inspection ${result}: ${remarks}`
-  });
-  await batch.save();
-
-  //Create and return the inspection record
-  const inspection = await Inspection.create({
-    inspectionCode,
-    batch: batchId,
-    inspector: inspectorId,
-    inspectionDate: inspectionDate || new Date(),
-    result,
-    remarks,
-    batchStatusBefore,
-    batchStatusAfter: newBatchStatus
-  });
-
-  return inspection.populate([
-    { path: 'batch', select: 'batchCode productName status' },
-    { path: 'inspector', select: 'name email role' }
-  ]);
 };
 
 // ─── Get All Inspections ──────────────────────────────────────────────────────
@@ -116,14 +146,17 @@ const getInspectionById = async (inspectionId, user) => {
   }
 
   // FARMER can only see inspections of their own batches
-  if (user.role === ROLES.FARMER) {
-    const batchFarmerId = inspection.batch.farmer
-      ? String(inspection.batch.farmer)
-      : null;
-    if (batchFarmerId !== String(user._id)) {
-      throw createError(403, 'You do not have access to this inspection');
-    }
+if (user.role === ROLES.FARMER) {
+  if (!inspection.batch) {
+    throw createError(404, 'The batch linked to this inspection no longer exists');
   }
+  const batchFarmerId = inspection.batch.farmer
+    ? String(inspection.batch.farmer)
+    : null;
+  if (batchFarmerId !== String(user._id)) {
+    throw createError(403, 'You do not have access to this inspection');
+  }
+}
 
   // INSPECTOR can only see their own inspections
   if (user.role === ROLES.INSPECTOR) {
