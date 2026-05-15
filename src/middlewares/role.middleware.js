@@ -2,6 +2,13 @@ const roleMiddleware = (...allowedRoles) => {
 
   return (req, res, next) => {
 
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required."
+      });
+    }
+
     // Check if user role is allowed
     if (!allowedRoles.includes(req.user.role)) {
 

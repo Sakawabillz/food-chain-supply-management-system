@@ -6,7 +6,7 @@ const {
   getAllUsers,
   getSingleUser,
   updateUserRole,
-  deactivateUser
+  deactivateUser,
   activateUser
 } = require("../controllers/user.controller");
 
@@ -48,6 +48,13 @@ router.patch(
   authMiddleware,
   roleMiddleware(ROLES.ADMIN),
   deactivateUser
+);
+
+router.patch(
+  "/:id/activate",
+  authMiddleware,
+  roleMiddleware(ROLES.ADMIN),
+  activateUser
 );
 
 module.exports = router;
