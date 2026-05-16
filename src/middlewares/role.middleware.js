@@ -1,8 +1,26 @@
-module.exports = (requiredRole) => (req, res, next) => {
-  if (!req.user) return res.status(401).json({ message: 'Unauthorized' });
-  const userRole = (req.user.role || '').toLowerCase();
-  const check = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-  const allowed = check.map(r => (r || '').toLowerCase());
-  if (!allowed.includes(userRole)) return res.status(403).json({ message: 'Forbidden' });
-  return next();
+const roleMiddleware = (...allowedRoles) => {
+
+  return (req, res, next) => {
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required."
+      });
+    }
+
+    // Check if user role is allowed
+    if (!allowedRoles.includes(req.user.role)) {
+
+      return res.status(403).json({
+        success: false,
+        message: "Access forbidden. Insufficient permissions."
+      });
+
+    }
+
+    next();
+  };
 };
+
+module.exports = roleMiddleware;
