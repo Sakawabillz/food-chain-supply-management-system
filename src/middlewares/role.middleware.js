@@ -1,4 +1,26 @@
-module.exports = (requiredRole) => (req, res, next) => {
-  // placeholder role check
-  next();
+const roleMiddleware = (...allowedRoles) => {
+
+  return (req, res, next) => {
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required."
+      });
+    }
+
+    // Check if user role is allowed
+    if (!allowedRoles.includes(req.user.role)) {
+
+      return res.status(403).json({
+        success: false,
+        message: "Access forbidden. Insufficient permissions."
+      });
+
+    }
+
+    next();
+  };
 };
+
+module.exports = roleMiddleware;

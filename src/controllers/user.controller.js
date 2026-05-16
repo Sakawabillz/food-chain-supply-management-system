@@ -1,134 +1,95 @@
+const mongoose = require("mongoose");
 const User = require("../models/user.model");
 const roles = require("../constants/roles");
 
-/*
-|--------------------------------------------------------------------------
-| Get All Users
-|--------------------------------------------------------------------------
-| Admin only
-*/
+const validRoles = Object.values(roles);
+const publicUserFields = "-password";
 
-const getAllUsers = async (req, res) => {
+const createError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
+
+const ensureValidUserId = (id) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw createError(400, "Invalid user id");
+  }
+};
+
+const getAllUsers = async (req, res, next) => {
   try {
-
-    const users = await User.find()
-      .select("-password")
-      .sort({ createdAt: -1 });
+    const users = await User.find().select(publicUserFields).sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
       count: users.length,
       data: users
     });
-
   } catch (error) {
-
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-
+    return next(error);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Get Single User
-|--------------------------------------------------------------------------
-| Admin only
-*/
-
-const getSingleUser = async (req, res) => {
+const getSingleUser = async (req, res, next) => {
   try {
+    ensureValidUserId(req.params.id);
 
-    const user = await User.findById(req.params.id)
-      .select("-password");
+    const user = await User.findById(req.params.id).select(publicUserFields);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
+      throw createError(404, "User not found");
     }
 
     return res.status(200).json({
       success: true,
       data: user
     });
-
   } catch (error) {
-
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-
+    return next(error);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Update User Role
-|--------------------------------------------------------------------------
-| Admin only
-*/
-
-const updateUserRole = async (req, res) => {
+const updateUserRole = async (req, res, next) => {
   try {
+    ensureValidUserId(req.params.id);
 
-    const { role } = req.body;
-
-    // Validate role
-    const validRoles = Object.values(roles);
+    const role = String(req.body.role || "").toUpperCase();
 
     if (!validRoles.includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role provided"
-      });
+      throw createError(400, "Invalid role provided");
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
+    const user = await User.findByIdAndUpdate(
       req.params.id,
       { role },
       {
         new: true,
         runValidators: true
       }
-    ).select("-password");
+    ).select(publicUserFields);
 
-    if (!updatedUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
+    if (!user) {
+      throw createError(404, "User not found");
     }
 
     return res.status(200).json({
       success: true,
       message: "User role updated successfully",
-      data: updatedUser
+      data: user
     });
-
   } catch (error) {
-
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-
+    return next(error);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Deactivate User
-|--------------------------------------------------------------------------
-| Admin only
-*/
-
-const deactivateUser = async (req, res) => {
+const deactivateUser = async (req, res, next) => {
   try {
+    ensureValidUserId(req.params.id);
+
+    if (String(req.user.id) === String(req.params.id)) {
+      throw createError(400, "You cannot deactivate your own account");
+    }
 
     const user = await User.findByIdAndUpdate(
       req.params.id,
@@ -136,13 +97,10 @@ const deactivateUser = async (req, res) => {
       {
         new: true
       }
-    ).select("-password");
+    ).select(publicUserFields);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
+      throw createError(404, "User not found");
     }
 
     return res.status(200).json({
@@ -150,26 +108,14 @@ const deactivateUser = async (req, res) => {
       message: "User deactivated successfully",
       data: user
     });
-
   } catch (error) {
-
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-
+    return next(error);
   }
 };
 
-/*
-|--------------------------------------------------------------------------
-| Activate User
-|--------------------------------------------------------------------------
-| Optional but useful
-*/
-
-const activateUser = async (req, res) => {
+const activateUser = async (req, res, next) => {
   try {
+    ensureValidUserId(req.params.id);
 
     const user = await User.findByIdAndUpdate(
       req.params.id,
@@ -177,13 +123,10 @@ const activateUser = async (req, res) => {
       {
         new: true
       }
-    ).select("-password");
+    ).select(publicUserFields);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
+      throw createError(404, "User not found");
     }
 
     return res.status(200).json({
@@ -191,14 +134,8 @@ const activateUser = async (req, res) => {
       message: "User activated successfully",
       data: user
     });
-
   } catch (error) {
-
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-
+    return next(error);
   }
 };
 
