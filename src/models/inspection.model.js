@@ -28,6 +28,8 @@ const inspectionSchema = new mongoose.Schema(
     result: {
       type: String,
       enum: ['PASSED', 'FAILED'],
+      uppercase: true,
+      trim: true,
       required: true
     },
     remarks: {
@@ -46,5 +48,7 @@ const inspectionSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+inspectionSchema.index({ batch: 1 }, { unique: true });
 
 module.exports = mongoose.model('Inspection', inspectionSchema);
