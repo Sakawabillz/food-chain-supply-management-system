@@ -44,14 +44,6 @@ const createInspectionService = async (inspectionData) => {
       };
   }
 
-  // // Prevent re-inspection of already rejected batch
-  // if (batch.status === BATCH_STATUS.REJECTED) {
-  //   return res.status(400).json({
-  //       success: false,
-  //       message: 'Batch has already been rejected and cannot be re-inspected.',
-  //     });
-  // }
-
   // Prevent duplicate inspection for same batch
 const existingBatchInspection = await Inspection.findOne({ batch: batchId });
 
