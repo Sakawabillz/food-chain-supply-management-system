@@ -1,190 +1,175 @@
-const Inspection = require("../models/inspection.model");
-const Batch = require("../models/batch.model");
-const { BATCH_STATUS } = require("../constants/batchStatus");
+const mongoose = require('mongoose');
+const Inspection = require('../models/inspection.model');
+const Batch = require('../models/batch.model');
+const BATCH_STATUS = require('../constants/batchStatus');
+const ROLES = require('../constants/roles');
+const { randomBytes } = require('crypto');
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const createInspectionService = async (inspectionData) => {
-  try{
-  const { inspectionCode, batchId, inspectorId, inspectionDate, result, remarks } = inspectionData;
+const createError = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
 
-  // Validate required fields
-    if(!inspectionCode || !batchId || !result){
-      return {
-        success: false,
-        message: 'InspectionCode, batchId, and result are required'
-      };
+const generateInspectionCode = () => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = randomBytes(3).toString('hex').toUpperCase();
+  return `INSP-${timestamp}-${random}`;
+};
+
+// ─── Create Inspection ────────────────────────────────────────────────────────
+const createInspection = async ({ batchId, result, remarks, inspectionDate }, inspectorId) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // 1. Check batch exists — inside transaction
+    const batch = await Batch.findById(batchId).session(session);
+    if (!batch) {
+      throw createError(404, 'Batch not found');
     }
 
-     if(!["PASSED", "FAILED"].includes(result)) {
-      return {
-        success: false,
-        message: 'Result must be either PASSED or FAILED'
-      };
+    // 2. Enforce sequence — batch must be DELIVERED before inspection
+    // This also implicitly blocks REJECTED and INSPECTED batches
+    if (batch.status !== BATCH_STATUS.DELIVERED) {
+      throw createError(400, `Batch cannot be inspected at this stage. Current status: ${batch.status}`);
     }
 
-  // Check batch exists
-  const batch = await Batch.findById(batchId);
-  if (!batch) {
-    return {
-        success: false,
-        message: 'Batch not found.',
-      };
-  }
+    // 3. Prevent double inspection — check if a PASSED inspection already exists
+    // Inside transaction to prevent TOCTOU race condition
+    const existingInspection = await Inspection.findOne({
+      batch: batchId,
+      result: 'PASSED'
+    }).session(session);
+    if (existingInspection) {
+      throw createError(400, 'This batch has already passed inspection');
+    }
 
-  // Confirm batch is in an inspectable state
-  const inspectableStatuses = [
-    BATCH_STATUS.DELIVERED,
-    BATCH_STATUS.IN_TRANSIT,
-    BATCH_STATUS.RECEIVED,
-  ];
-  if (!inspectableStatuses.includes(batch.status)) {
-    return {
-        success: false,
-        message: `Batch cannot be inspected. Current status: ${batch.status}`,
-      };
-  }
+    // 4. Determine new batch status based on result
+    const newBatchStatus = result === 'PASSED'
+      ? BATCH_STATUS.INSPECTED
+      : BATCH_STATUS.REJECTED;
 
-  // Prevent duplicate inspection for same batch
-const existingBatchInspection = await Inspection.findOne({ batch: batchId });
+    // 5. Generate inspection code
+    const inspectionCode = generateInspectionCode();
 
-if(existingBatchInspection){
-   return {
-      success:false,
-      message:"This batch has already been inspected"
-   };
-}
-  const existingInspection = await Inspection.findOne({inspectionCode});
-  if (existingInspection) {
-    return {
-        success: false,
-        message: 'Inspection code already exists for this batch',
-      };
-  }
+    // 6. Record batch status before change
+    const batchStatusBefore = batch.status;
 
-  // Create inspection record
-  const inspection = await Inspection.create({
-    inspectionCode,
-    batch: batchId,
-    inspector: inspectorId,
-    inspectionDate: inspectionDate || Date.now(),
-    result,
-    remarks: remarks || "",
-  });
+    // 7. Update batch status inside transaction
+    batch.status = newBatchStatus;
+    batch.statusHistory.push({
+      status: newBatchStatus,
+      changedBy: inspectorId,
+      note: `Inspection ${result}: ${remarks}`
+    });
+    await batch.save({ session });
 
-  // Update batch status based on result
-  batch.status = result === "PASSED" ? BATCH_STATUS.INSPECTED : BATCH_STATUS.REJECTED;
-  await batch.save();
+    // 8. Create inspection record inside same transaction
+    const [inspection] = await Inspection.create(
+      [
+        {
+          inspectionCode,
+          batch: batchId,
+          inspector: inspectorId,
+          inspectionDate: inspectionDate || new Date(),
+          result,
+          remarks,
+          batchStatusBefore,
+          batchStatusAfter: newBatchStatus
+        }
+      ],
+      { session }
+    );
 
-  return {
-      success: true,
-      message: `Inspection created. Batch marked as ${batch.status}.`,
-      data: inspection,
-    };
+    // 9. Commit — both writes succeed or neither does
+    await session.commitTransaction();
 
-    }catch(error){
-    return {
-      success: false,
-      message: error.message
-   };
+    let populatedInspection = inspection;
+    try {
+      populatedInspection = await inspection.populate([
+        { path: 'batch', select: 'batchCode productName status' },
+        { path: 'inspector', select: 'name email role' }
+      ]);
+    } catch (populateError) {
+      console.warn('Inspection created successfully but population failed:', populateError);
+    }
+
+    return populatedInspection;
+
+  } catch (error) {
+    // Roll back everything if anything failed before commit
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    throw error;
+  } finally {
+    session.endSession();
   }
 };
 
+// ─── Get All Inspections ──────────────────────────────────────────────────────
 
- // Fetch all inspections with optional role-based filtering.
- 
-const getAllInspectionsService = async (user) => {
-  try{
-  const { role, _id: userId } = user;
+const getAllInspections = async (user) => {
   let query = {};
 
-  if (role === "ADMIN" || role === "DISTRIBUTOR") {
-    // Full read access
-    query = {};
-  } else if (role === "INSPECTOR") {
-    // Only their own inspections
-    query = { inspector: userId };
-  } else if (role === "FARMER") {
-    // Only inspections linked to their batches
-    const farmerBatches = await Batch.find({ farmer: userId }).select("_id");
-    const batchIds = farmerBatches.map((b) => b._id);
+  if (user.role === ROLES.INSPECTOR) {
+    // Inspector sees only their own inspections
+    query = { inspector: user._id };
+  } else if (user.role === ROLES.FARMER) {
+    // Farmer sees inspections of their batches only
+    const farmerBatches = await Batch.find({ farmer: user._id }).select('_id');
+    const batchIds = farmerBatches.map(b => b._id);
     query = { batch: { $in: batchIds } };
-  } else {
-    return {
-        success: false,
-        message: `Access denied.`,
-      };
   }
+  // ADMIN and DISTRIBUTOR get everything — query stays {}
 
   const inspections = await Inspection.find(query)
-    .populate("batch", "batchCode status")
-    .populate("inspector", "name email")
+    .populate('batch', 'batchCode productName status')
+    .populate('inspector', 'name email role')
     .sort({ createdAt: -1 });
 
   return inspections;
-  }catch(error){
-    return {
-      success: false,
-      message: error.message
-   };
-  }
 };
 
+// ─── Get Single Inspection ────────────────────────────────────────────────────
 
-// Fetch a single inspection by ID with role-based access check.
-
-const getInspectionByIdService = async (inspectionId, user) => {
-  try{
-  const { role, _id: userId } = user;
-
+const getInspectionById = async (inspectionId, user) => {
   const inspection = await Inspection.findById(inspectionId)
-    .populate("batch", "batchCode status farmer")
-    .populate("inspector", "name email");
+    .populate('batch', 'batchCode productName status farmer')
+    .populate('inspector', 'name email role');
 
   if (!inspection) {
-    return {
-        success: false,
-        message: `Inspection not found.`,
-      };
+    throw createError(404, 'Inspection not found');
   }
 
-  // Role-based access check
-  if (role === "INSPECTOR") {
-    if (inspection.inspector._id.toString() !== userId.toString()) {
-      return {
-        success: false,
-        message: `Access denied. This inspection does not belong to you`,
-      };
+  // FARMER can only see inspections of their own batches
+if (user.role === ROLES.FARMER) {
+  if (!inspection.batch) {
+    throw createError(404, 'The batch linked to this inspection no longer exists');
+  }
+  const batchFarmerId = inspection.batch.farmer
+    ? String(inspection.batch.farmer)
+    : null;
+  if (batchFarmerId !== String(user._id)) {
+    throw createError(403, 'You do not have access to this inspection');
+  }
+}
+
+  // INSPECTOR can only see their own inspections
+  if (user.role === ROLES.INSPECTOR) {
+    if (String(inspection.inspector._id) !== String(user._id)) {
+      throw createError(403, 'You do not have access to this inspection');
     }
-  } else if (role === "FARMER") {
-    const batchFarmerId = inspection.batch.farmer?.toString();
-    if (batchFarmerId !== userId.toString()) {
-      return {
-        success: false,
-        message: `Access denied. This batch does not belong to you`,
-      };
-    }
-  } else if (role !== "ADMIN" && role !== "DISTRIBUTOR") {
-    return {
-        success: false,
-        message: `Access denied.`,
-      };
   }
 
-  return {
-      success: true,
-      message: 'Inspection fetched successfully.',
-      data: inspection,
-    };
-    }catch(error){
-    return {
-      success: false,
-      message: error.message
-   };
-  }
+  return inspection;
 };
 
 module.exports = {
-  createInspectionService,
-  getAllInspectionsService,
-  getInspectionByIdService,
+  createInspection,
+  getAllInspections,
+  getInspectionById
 };
