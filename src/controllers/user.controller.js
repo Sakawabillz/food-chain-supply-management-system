@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const User = require("../models/user.model");
 const roles = require("../constants/roles");
+const logAction = require("../utils/logAction");
 
 const validRoles = Object.values(roles);
 const publicUserFields = "-password";
@@ -73,6 +74,14 @@ const updateUserRole = async (req, res, next) => {
       throw createError(404, "User not found");
     }
 
+    await logAction(
+      req.user.id,
+      "UPDATE_USER_ROLE",
+      "User",
+      user._id,
+      `Updated user role to ${role}`
+    );
+
     return res.status(200).json({
       success: true,
       message: "User role updated successfully",
@@ -103,6 +112,14 @@ const deactivateUser = async (req, res, next) => {
       throw createError(404, "User not found");
     }
 
+    await logAction(
+      req.user.id,
+      "DEACTIVATE_USER",
+      "User",
+      user._id,
+      "Deactivated user account"
+    );
+
     return res.status(200).json({
       success: true,
       message: "User deactivated successfully",
@@ -128,6 +145,14 @@ const activateUser = async (req, res, next) => {
     if (!user) {
       throw createError(404, "User not found");
     }
+
+    await logAction(
+      req.user.id,
+      "ACTIVATE_USER",
+      "User",
+      user._id,
+      "Activated user account"
+    );
 
     return res.status(200).json({
       success: true,

@@ -2,6 +2,7 @@ const Batch = require('../models/batch.model');
 const User = require('../models/user.model');
 const BATCH_STATUS = require('../constants/batchStatus');
 const ROLES = require('../constants/roles');
+const logAction = require('../utils/logAction');
 
 const createError = (status, message) => {
   const error = new Error(message);
@@ -30,7 +31,7 @@ const populateBatch = (query) => {
 const createBatch = async (batchData, actorId) => {
   await ensureFarmer(batchData.farmer);
 
-  return Batch.create({
+  const batch = await Batch.create({
     ...batchData,
     status: BATCH_STATUS.HARVESTED,
     statusHistory: [{
@@ -39,6 +40,16 @@ const createBatch = async (batchData, actorId) => {
       note: 'Batch created'
     }]
   });
+
+  await logAction(
+    actorId || batchData.farmer,
+    'CREATE_BATCH',
+    'Batch',
+    batch._id,
+    `Created batch ${batch.batchCode}`
+  );
+
+  return batch;
 };
 
 const getAllBatches = async (query = {}, options = {}) => {
@@ -91,6 +102,13 @@ const updateBatchStatus = async (id, status, actorId) => {
   });
 
   await batch.save();
+  await logAction(
+    actorId,
+    'UPDATE_BATCH_STATUS',
+    'Batch',
+    batch._id,
+    `Updated batch status to ${status}`
+  );
 
   return populateBatch(Batch.findById(batch._id));
 };

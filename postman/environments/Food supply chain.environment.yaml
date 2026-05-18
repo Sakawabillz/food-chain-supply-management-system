@@ -1,0 +1,5 @@
+name: Food supply chain
+values:
+  - key: baseUrl
+    value: ''
+color: 180
