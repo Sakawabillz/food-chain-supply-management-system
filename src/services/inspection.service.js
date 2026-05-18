@@ -3,6 +3,7 @@ const Batch = require('../models/batch.model');
 const BATCH_STATUS = require('../constants/batchStatus');
 const ROLES = require('../constants/roles');
 const { randomBytes } = require('crypto');
+const logAction = require('../utils/logAction');
 
 const createError = (status, message) => {
   const error = new Error(message);
@@ -73,6 +74,13 @@ const createInspection = async ({ batchId, result, remarks, inspectionDate }, in
     note: `Inspection ${result}: ${remarks}`
   });
   await batch.save();
+  await logAction(
+    inspectorId,
+    result === 'PASSED' ? 'INSPECTION_PASS' : 'INSPECTION_FAIL',
+    'Batch',
+    batch._id,
+    `Inspection ${inspection.inspectionCode} ${result}; batch marked ${batchStatusAfter}`
+  );
 
   return populateInspection(Inspection.findById(inspection._id));
 };

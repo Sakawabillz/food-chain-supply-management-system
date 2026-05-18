@@ -1,5 +1,6 @@
 const User = require('../models/user.model');
 const generateToken = require('../helpers/generateToken');
+const logAction = require('../utils/logAction');
 
 module.exports = {
   register: async ({ name, email, password, role }) => {
@@ -18,6 +19,13 @@ module.exports = {
       role: normalizedRole
     });
     await user.save();
+    await logAction(
+      user._id,
+      'REGISTER_USER',
+      'User',
+      user._id,
+      `Registered ${user.role} account`
+    );
     return user;
   },
 
@@ -38,6 +46,7 @@ module.exports = {
     }
 
     const token = generateToken({ id: user._id, role: user.role }, { expiresIn: '8h' });
+    await logAction(user._id, 'LOGIN', 'User', user._id, 'User logged in');
     return { user, token };
   }
 };
