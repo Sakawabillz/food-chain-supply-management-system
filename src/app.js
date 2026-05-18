@@ -4,6 +4,7 @@ const userRoutes = require('./routes/user.routes');
 const batchRoutes = require('./routes/batch.routes');
 const shipmentRoutes = require('./routes/shipment.routes');
 const inspectionRoutes = require('./routes/inspection.routes');
+const auditRoutes = require('./routes/audit.routes');
 
 const app = express();
 
@@ -18,6 +19,8 @@ app.use('/api/shipment', shipmentRoutes);
 app.use('/api/v1/shipment', shipmentRoutes);
 app.use('/api/inspection', inspectionRoutes);
 app.use('/api/v1/inspection', inspectionRoutes);
+app.use('/api/audit', auditRoutes);
+app.use('/api/v1/audit', auditRoutes);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

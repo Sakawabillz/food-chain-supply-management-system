@@ -3,6 +3,7 @@ const Batch = require('../models/batch.model');
 const BATCH_STATUS = require('../constants/batchStatus');
 const SHIPMENT_STATUS = require('../constants/shipmentStatus');
 const ROLES = require('../constants/roles');
+const logAction = require('../utils/logAction');
 
 const createError = (status, message) => {
   const error = new Error(message);
@@ -81,6 +82,13 @@ const createShipment = async (payload, distributorId) => {
     note: `Shipment ${shipment.shipmentCode} created`
   });
   await batch.save();
+  await logAction(
+    distributorId,
+    'CREATE_SHIPMENT',
+    'Shipment',
+    shipment._id,
+    `Created shipment ${shipment.shipmentCode} for batch ${batch.batchCode}`
+  );
 
   return populateShipment(Shipment.findById(shipment._id));
 };
@@ -149,6 +157,13 @@ const markAsDelivered = async (id, distributorId) => {
     note: `Shipment ${shipment.shipmentCode} delivered`
   });
   await batch.save();
+  await logAction(
+    distributorId,
+    'DELIVER_SHIPMENT',
+    'Shipment',
+    shipment._id,
+    `Delivered shipment ${shipment.shipmentCode}; batch marked ${BATCH_STATUS.DELIVERED}`
+  );
 
   return populateShipment(Shipment.findById(shipment._id));
 };
